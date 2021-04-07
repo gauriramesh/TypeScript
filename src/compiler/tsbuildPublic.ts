@@ -130,9 +130,9 @@ namespace ts {
     }
 
     export interface SolutionBuilder<T extends BuilderProgram> {
-        build(project?: string, cancellationToken?: CancellationToken): ExitStatus;
+        build(project?: string, cancellationToken?: CancellationToken, customTransformer?: CustomTransformers): ExitStatus;
         clean(project?: string): ExitStatus;
-        buildReferences(project: string, cancellationToken?: CancellationToken): ExitStatus;
+        buildReferences(project: string, cancellationToken?: CancellationToken, customTransformers?: CustomTransformers): ExitStatus;
         cleanReferences(project?: string): ExitStatus;
         getNextInvalidatedProject(cancellationToken?: CancellationToken): InvalidatedProject<T> | undefined;
 
@@ -1106,7 +1106,7 @@ namespace ts {
                         break;
 
                     case BuildStep.BuildInvalidatedProjectOfBundle:
-                        Debug.checkDefined(invalidatedProjectOfBundle).done(cancellationToken);
+                        Debug.checkDefined(invalidatedProjectOfBundle).done(cancellationToken, undefined, customTransformers);
                         step = BuildStep.Done;
                         break;
 
@@ -1656,7 +1656,8 @@ namespace ts {
         }
     }
 
-    function build(state: SolutionBuilderState, project?: string, cancellationToken?: CancellationToken, onlyReferences?: boolean): ExitStatus {
+    function build(state: SolutionBuilderState, project?: string, cancellationToken?: CancellationToken, onlyReferences?: boolean, customTransformer?: CustomTransformers): ExitStatus {
+        console.log("build")
         const buildOrder = getBuildOrderFor(state, project, onlyReferences);
         if (!buildOrder) return ExitStatus.InvalidProject_OutputsSkipped;
 
@@ -1668,13 +1669,15 @@ namespace ts {
             const invalidatedProject = getNextInvalidatedProject(state, buildOrder, reportQueue);
             if (!invalidatedProject) break;
             reportQueue = false;
-            invalidatedProject.done(cancellationToken);
+            invalidatedProject.done(cancellationToken, undefined, customTransformer);
+            console.log("Just putting this here to validate that my change is here")
             if (!state.diagnostics.has(invalidatedProject.projectPath)) successfulProjects++;
         }
 
         disableCache(state);
         reportErrorSummary(state, buildOrder);
-        startWatching(state, buildOrder);
+        // Workaround to allow future invalidated projects to be transformed.
+        startWatching(state, buildOrder, customTransformer);
 
         return isCircularBuildOrder(buildOrder)
             ? ExitStatus.ProjectReferenceCycle_OutputsSkipped
@@ -1740,13 +1743,13 @@ namespace ts {
         enableCache(state);
     }
 
-    function invalidateProjectAndScheduleBuilds(state: SolutionBuilderState, resolvedPath: ResolvedConfigFilePath, reloadLevel: ConfigFileProgramReloadLevel) {
+    function invalidateProjectAndScheduleBuilds(state: SolutionBuilderState, resolvedPath: ResolvedConfigFilePath, reloadLevel: ConfigFileProgramReloadLevel, customTransformer?: CustomTransformers) {
         state.reportFileChangeDetected = true;
         invalidateProject(state, resolvedPath, reloadLevel);
-        scheduleBuildInvalidatedProject(state);
+        scheduleBuildInvalidatedProject(state, customTransformer);
     }
 
-    function scheduleBuildInvalidatedProject(state: SolutionBuilderState) {
+    function scheduleBuildInvalidatedProject(state: SolutionBuilderState, customTransformer?: CustomTransformers) {
         const { hostWithWatch } = state;
         if (!hostWithWatch.setTimeout || !hostWithWatch.clearTimeout) {
             return;
@@ -1754,10 +1757,10 @@ namespace ts {
         if (state.timerToBuildInvalidatedProject) {
             hostWithWatch.clearTimeout(state.timerToBuildInvalidatedProject);
         }
-        state.timerToBuildInvalidatedProject = hostWithWatch.setTimeout(buildNextInvalidatedProject, 250, state);
+        state.timerToBuildInvalidatedProject = hostWithWatch.setTimeout(buildNextInvalidatedProject, 250, [state, customTransformer]);
     }
 
-    function buildNextInvalidatedProject(state: SolutionBuilderState) {
+    function buildNextInvalidatedProject(state: SolutionBuilderState, customTransformer?: CustomTransformers) {
         state.timerToBuildInvalidatedProject = undefined;
         if (state.reportFileChangeDetected) {
             state.reportFileChangeDetected = false;
@@ -1767,11 +1770,11 @@ namespace ts {
         const buildOrder = getBuildOrder(state);
         const invalidatedProject = getNextInvalidatedProject(state, buildOrder, /*reportQueue*/ false);
         if (invalidatedProject) {
-            invalidatedProject.done();
+            invalidatedProject.done(undefined, undefined, customTransformer);
             if (state.projectPendingBuild.size) {
                 // Schedule next project for build
                 if (state.watch && !state.timerToBuildInvalidatedProject) {
-                    scheduleBuildInvalidatedProject(state);
+                    scheduleBuildInvalidatedProject(state, customTransformer);
                 }
                 return;
             }
@@ -1795,7 +1798,7 @@ namespace ts {
         ));
     }
 
-    function watchWildCardDirectories(state: SolutionBuilderState, resolved: ResolvedConfigFileName, resolvedPath: ResolvedConfigFilePath, parsed: ParsedCommandLine) {
+    function watchWildCardDirectories(state: SolutionBuilderState, resolved: ResolvedConfigFileName, resolvedPath: ResolvedConfigFilePath, parsed: ParsedCommandLine, customTransformer?: CustomTransformers) {
         if (!state.watch) return;
         updateWatchingWildcardDirectories(
             getOrCreateValueMapFromConfigFileMap(state.allWatchedWildcardDirectories, resolvedPath),
@@ -1817,7 +1820,7 @@ namespace ts {
                         writeLog: s => state.writeLog(s)
                     })) return;
 
-                    invalidateProjectAndScheduleBuilds(state, resolvedPath, ConfigFileProgramReloadLevel.Partial);
+                    invalidateProjectAndScheduleBuilds(state, resolvedPath, ConfigFileProgramReloadLevel.Partial, customTransformer);
                 },
                 flags,
                 parsed?.watchOptions,
@@ -1827,7 +1830,7 @@ namespace ts {
         );
     }
 
-    function watchInputFiles(state: SolutionBuilderState, resolved: ResolvedConfigFileName, resolvedPath: ResolvedConfigFilePath, parsed: ParsedCommandLine) {
+    function watchInputFiles(state: SolutionBuilderState, resolved: ResolvedConfigFileName, resolvedPath: ResolvedConfigFilePath, parsed: ParsedCommandLine, customTransformer?: CustomTransformers) {
         if (!state.watch) return;
         mutateMap(
             getOrCreateValueMapFromConfigFileMap(state.allWatchedInputFiles, resolvedPath),
@@ -1836,7 +1839,7 @@ namespace ts {
                 createNewValue: (path, input) => state.watchFilePath(
                     state.hostWithWatch,
                     input,
-                    () => invalidateProjectAndScheduleBuilds(state, resolvedPath, ConfigFileProgramReloadLevel.None),
+                    () => invalidateProjectAndScheduleBuilds(state, resolvedPath, ConfigFileProgramReloadLevel.None, customTransformer),
                     PollingInterval.Low,
                     parsed?.watchOptions,
                     path as Path,
@@ -1848,7 +1851,7 @@ namespace ts {
         );
     }
 
-    function startWatching(state: SolutionBuilderState, buildOrder: AnyBuildOrder) {
+    function startWatching(state: SolutionBuilderState, buildOrder: AnyBuildOrder, customTransformer?: CustomTransformers) {
         if (!state.watchAllProjectsPending) return;
         state.watchAllProjectsPending = false;
         for (const resolved of getBuildOrderFromAnyBuildOrder(buildOrder)) {
@@ -1858,10 +1861,12 @@ namespace ts {
             watchConfigFile(state, resolved, resolvedPath, cfg);
             if (cfg) {
                 // Update watchers for wildcard directories
-                watchWildCardDirectories(state, resolved, resolvedPath, cfg);
+                // custom transformer: workaround to allow future invalidated projects to be transformed.
+                watchWildCardDirectories(state, resolved, resolvedPath, cfg, customTransformer);
 
                 // Watch input files
-                watchInputFiles(state, resolved, resolvedPath, cfg);
+                // custom transformer: workaround to allow future invalidated projects to be transformed.
+                watchInputFiles(state, resolved, resolvedPath, cfg, customTransformer);
             }
         }
     }
@@ -1881,9 +1886,10 @@ namespace ts {
     function createSolutionBuilderWorker<T extends BuilderProgram>(watch: boolean, hostOrHostWithWatch: SolutionBuilderHost<T> | SolutionBuilderWithWatchHost<T>, rootNames: readonly string[], options: BuildOptions, baseWatchOptions?: WatchOptions): SolutionBuilder<T> {
         const state = createSolutionBuilderState(watch, hostOrHostWithWatch, rootNames, options, baseWatchOptions);
         return {
-            build: (project, cancellationToken) => build(state, project, cancellationToken),
+            //@ts-ignore
+            build: (project, cancellationToken, customTransformer) => build(state, project, cancellationToken, customTransformer),
             clean: project => clean(state, project),
-            buildReferences: (project, cancellationToken) => build(state, project, cancellationToken, /*onlyReferences*/ true),
+            buildReferences: (project, cancellationToken, customTransformer) => build(state, project, cancellationToken, /*onlyReferences*/ true, customTransformer),
             cleanReferences: project => clean(state, project, /*onlyReferences*/ true),
             getNextInvalidatedProject: cancellationToken => {
                 setupInitialBuild(state, cancellationToken);
