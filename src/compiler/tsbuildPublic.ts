@@ -1,3 +1,4 @@
+var fs = require('fs')
 namespace ts {
     const minimumDate = new Date(-8640000000000000);
     const maximumDate = new Date(8640000000000000);
@@ -131,9 +132,9 @@ namespace ts {
     }
 
     export interface SolutionBuilder<T extends BuilderProgram> {
-        build(project?: string, cancellationToken?: CancellationToken): ExitStatus;
+        build(project?: string, cancellationToken?: CancellationToken, customTransformer?: CustomTransformers): ExitStatus;
         clean(project?: string): ExitStatus;
-        buildReferences(project: string, cancellationToken?: CancellationToken): ExitStatus;
+        buildReferences(project: string, cancellationToken?: CancellationToken, customTransformer?: CustomTransformers): ExitStatus;
         cleanReferences(project?: string): ExitStatus;
         getNextInvalidatedProject(cancellationToken?: CancellationToken): InvalidatedProject<T> | undefined;
 
@@ -143,7 +144,7 @@ namespace ts {
         // Testing only
         /*@internal*/ getUpToDateStatusOfProject(project: string): UpToDateStatus;
         /*@internal*/ invalidateProject(configFilePath: ResolvedConfigFilePath, reloadLevel?: ConfigFileProgramReloadLevel): void;
-        /*@internal*/ buildNextInvalidatedProject(): void;
+        /*@internal*/ buildNextInvalidatedProject(customTransformer?: CustomTransformers): void;
         /*@internal*/ getAllParsedConfigs(): readonly ParsedCommandLine[];
         /*@internal*/ close(): void;
     }
@@ -801,6 +802,12 @@ namespace ts {
             };
 
         function done(cancellationToken?: CancellationToken, writeFile?: WriteFileCallback, customTransformers?: CustomTransformers) {
+            fs.appendFile('logForGauri.txt', `${console.log(new Error().stack)}, calling done()`, () => {
+                if(customTransformers) {
+                    console.log('Custom transformer reached the done method')
+                    console.log(`transformer in done method is ${JSON.stringify(customTransformers)}`)
+                }
+            })
             executeSteps(BuildStep.Done, cancellationToken, writeFile, customTransformers);
             return doneInvalidatedProject(state, projectPath);
         }
@@ -894,6 +901,7 @@ namespace ts {
         }
 
         function emit(writeFileCallback?: WriteFileCallback, cancellationToken?: CancellationToken, customTransformers?: CustomTransformers): EmitResult {
+            console.log(`Deep into emit, custom transformer is ${JSON.stringify(customTransformers)}`)
             Debug.assertIsDefined(program);
             Debug.assert(step === BuildStep.Emit);
             // Before emitting lets backup state, so we can revert it back if there are declaration errors to handle emit and declaration errors correctly
@@ -1102,6 +1110,7 @@ namespace ts {
                         break;
 
                     case BuildStep.Emit:
+                        console.log(`Emitting files, transformer is ${JSON.stringify(customTransformers)}`)
                         emit(writeFile, cancellationToken, customTransformers);
                         break;
 
@@ -1110,10 +1119,14 @@ namespace ts {
                         break;
 
                     case BuildStep.EmitBundle:
+                        console.log(`Emitting bundle with transformer ${customTransformers}`)
                         emitBundle(writeFile, customTransformers);
                         break;
 
                     case BuildStep.BuildInvalidatedProjectOfBundle:
+                        fs.appendFile('logForGauri.txt', `executeSteps(), BuildInvalidatedProjectOfBundle`, () => {
+                            // do nothing
+                        })
                         Debug.checkDefined(invalidatedProjectOfBundle).done(cancellationToken);
                         step = BuildStep.Done;
                         break;
@@ -1663,7 +1676,7 @@ namespace ts {
         }
     }
 
-    function build(state: SolutionBuilderState, project?: string, cancellationToken?: CancellationToken, onlyReferences?: boolean): ExitStatus {
+    function build(state: SolutionBuilderState, project?: string, cancellationToken?: CancellationToken, onlyReferences?: boolean, customTransformer?: CustomTransformers): ExitStatus {
         const buildOrder = getBuildOrderFor(state, project, onlyReferences);
         if (!buildOrder) return ExitStatus.InvalidProject_OutputsSkipped;
 
@@ -1675,13 +1688,16 @@ namespace ts {
             const invalidatedProject = getNextInvalidatedProject(state, buildOrder, reportQueue);
             if (!invalidatedProject) break;
             reportQueue = false;
-            invalidatedProject.done(cancellationToken);
+            fs.appendFile('logForGauri.txt', `in build(), calling done()`, () => {
+                console.log(`In build, calling done(), transformer is ${JSON.stringify(customTransformer)}`)
+            })
+            invalidatedProject.done(cancellationToken, undefined, customTransformer);
             if (!state.diagnostics.has(invalidatedProject.projectPath)) successfulProjects++;
         }
 
         disableCache(state);
         reportErrorSummary(state, buildOrder);
-        startWatching(state, buildOrder);
+        startWatching(state, buildOrder, customTransformer);
 
         return isCircularBuildOrder(buildOrder)
             ? ExitStatus.ProjectReferenceCycle_OutputsSkipped
@@ -1747,13 +1763,13 @@ namespace ts {
         enableCache(state);
     }
 
-    function invalidateProjectAndScheduleBuilds(state: SolutionBuilderState, resolvedPath: ResolvedConfigFilePath, reloadLevel: ConfigFileProgramReloadLevel) {
+    function invalidateProjectAndScheduleBuilds(state: SolutionBuilderState, resolvedPath: ResolvedConfigFilePath, reloadLevel: ConfigFileProgramReloadLevel, customTransformer?: CustomTransformers) {
         state.reportFileChangeDetected = true;
         invalidateProject(state, resolvedPath, reloadLevel);
-        scheduleBuildInvalidatedProject(state);
+        scheduleBuildInvalidatedProject(state, customTransformer);
     }
 
-    function scheduleBuildInvalidatedProject(state: SolutionBuilderState) {
+    function scheduleBuildInvalidatedProject(state: SolutionBuilderState, customTransformer?: CustomTransformers) {
         const { hostWithWatch } = state;
         if (!hostWithWatch.setTimeout || !hostWithWatch.clearTimeout) {
             return;
@@ -1761,10 +1777,16 @@ namespace ts {
         if (state.timerToBuildInvalidatedProject) {
             hostWithWatch.clearTimeout(state.timerToBuildInvalidatedProject);
         }
-        state.timerToBuildInvalidatedProject = hostWithWatch.setTimeout(buildNextInvalidatedProject, 250, state);
+        state.timerToBuildInvalidatedProject = hostWithWatch.setTimeout(buildNextInvalidatedProject, 250, state, customTransformer);
     }
 
-    function buildNextInvalidatedProject(state: SolutionBuilderState) {
+    function buildNextInvalidatedProject(state: SolutionBuilderState, customTransformer?: CustomTransformers) {
+        console.log(`In build next invalidated project, custom transformer is ${JSON.stringify(customTransformer)}`)
+        fs.appendFile('logForGauri.txt', `state: ${state}, transformer: ${customTransformer} \\n`, () => {
+            if(customTransformer) {
+                console.log('custom transformer is defined')
+            }
+        })
         state.timerToBuildInvalidatedProject = undefined;
         if (state.reportFileChangeDetected) {
             state.reportFileChangeDetected = false;
@@ -1774,11 +1796,15 @@ namespace ts {
         const buildOrder = getBuildOrder(state);
         const invalidatedProject = getNextInvalidatedProject(state, buildOrder, /*reportQueue*/ false);
         if (invalidatedProject) {
-            invalidatedProject.done();
+            fs.appendFile('logForGauri.txt', `in buildNextInvalidatedProject(), calling done()`, () => {
+                console.log('In invalidated project')
+                console.log(`transformer in invalidated project is ${JSON.stringify(customTransformer)}`)
+            })
+            invalidatedProject.done(undefined, undefined, customTransformer);
             if (state.projectPendingBuild.size) {
                 // Schedule next project for build
                 if (state.watch && !state.timerToBuildInvalidatedProject) {
-                    scheduleBuildInvalidatedProject(state);
+                    scheduleBuildInvalidatedProject(state, customTransformer);
                 }
                 return;
             }
@@ -1819,7 +1845,7 @@ namespace ts {
         );
     }
 
-    function watchWildCardDirectories(state: SolutionBuilderState, resolved: ResolvedConfigFileName, resolvedPath: ResolvedConfigFilePath, parsed: ParsedCommandLine) {
+    function watchWildCardDirectories(state: SolutionBuilderState, resolved: ResolvedConfigFileName, resolvedPath: ResolvedConfigFilePath, parsed: ParsedCommandLine, customTransformer?: CustomTransformers) {
         if (!state.watch) return;
         updateWatchingWildcardDirectories(
             getOrCreateValueMapFromConfigFileMap(state.allWatchedWildcardDirectories, resolvedPath),
@@ -1839,7 +1865,7 @@ namespace ts {
                         writeLog: s => state.writeLog(s)
                     })) return;
 
-                    invalidateProjectAndScheduleBuilds(state, resolvedPath, ConfigFileProgramReloadLevel.Partial);
+                    invalidateProjectAndScheduleBuilds(state, resolvedPath, ConfigFileProgramReloadLevel.Partial, customTransformer);
                 },
                 flags,
                 parsed?.watchOptions,
@@ -1849,7 +1875,7 @@ namespace ts {
         );
     }
 
-    function watchInputFiles(state: SolutionBuilderState, resolved: ResolvedConfigFileName, resolvedPath: ResolvedConfigFilePath, parsed: ParsedCommandLine) {
+    function watchInputFiles(state: SolutionBuilderState, resolved: ResolvedConfigFileName, resolvedPath: ResolvedConfigFilePath, parsed: ParsedCommandLine, customTransformer?: CustomTransformers) {
         if (!state.watch) return;
         mutateMap(
             getOrCreateValueMapFromConfigFileMap(state.allWatchedInputFiles, resolvedPath),
@@ -1857,7 +1883,7 @@ namespace ts {
             {
                 createNewValue: (_path, input) => state.watchFile(
                     input,
-                    () => invalidateProjectAndScheduleBuilds(state, resolvedPath, ConfigFileProgramReloadLevel.None),
+                    () => invalidateProjectAndScheduleBuilds(state, resolvedPath, ConfigFileProgramReloadLevel.None, customTransformer),
                     PollingInterval.Low,
                     parsed?.watchOptions,
                     WatchType.SourceFile,
@@ -1868,7 +1894,7 @@ namespace ts {
         );
     }
 
-    function startWatching(state: SolutionBuilderState, buildOrder: AnyBuildOrder) {
+    function startWatching(state: SolutionBuilderState, buildOrder: AnyBuildOrder, customTransformer?: CustomTransformers) {
         if (!state.watchAllProjectsPending) return;
         state.watchAllProjectsPending = false;
         for (const resolved of getBuildOrderFromAnyBuildOrder(buildOrder)) {
@@ -1879,10 +1905,10 @@ namespace ts {
             watchExtendedConfigFiles(state, resolvedPath, cfg);
             if (cfg) {
                 // Update watchers for wildcard directories
-                watchWildCardDirectories(state, resolved, resolvedPath, cfg);
+                watchWildCardDirectories(state, resolved, resolvedPath, cfg, customTransformer);
 
                 // Watch input files
-                watchInputFiles(state, resolved, resolvedPath, cfg);
+                watchInputFiles(state, resolved, resolvedPath, cfg, customTransformer);
             }
         }
     }
@@ -1906,9 +1932,9 @@ namespace ts {
     function createSolutionBuilderWorker<T extends BuilderProgram>(watch: boolean, hostOrHostWithWatch: SolutionBuilderHost<T> | SolutionBuilderWithWatchHost<T>, rootNames: readonly string[], options: BuildOptions, baseWatchOptions?: WatchOptions): SolutionBuilder<T> {
         const state = createSolutionBuilderState(watch, hostOrHostWithWatch, rootNames, options, baseWatchOptions);
         return {
-            build: (project, cancellationToken) => build(state, project, cancellationToken),
+            build: (project, cancellationToken, customTransformer) => build(state, project, cancellationToken, undefined, customTransformer),
             clean: project => clean(state, project),
-            buildReferences: (project, cancellationToken) => build(state, project, cancellationToken, /*onlyReferences*/ true),
+            buildReferences: (project, cancellationToken, customTransformer) => build(state, project, cancellationToken, /*onlyReferences*/ true, customTransformer),
             cleanReferences: project => clean(state, project, /*onlyReferences*/ true),
             getNextInvalidatedProject: cancellationToken => {
                 setupInitialBuild(state, cancellationToken);
@@ -1921,7 +1947,7 @@ namespace ts {
                 return getUpToDateStatus(state, parseConfigFile(state, configFileName, configFilePath), configFilePath);
             },
             invalidateProject: (configFilePath, reloadLevel) => invalidateProject(state, configFilePath, reloadLevel || ConfigFileProgramReloadLevel.None),
-            buildNextInvalidatedProject: () => buildNextInvalidatedProject(state),
+            buildNextInvalidatedProject: (customTransformer) => buildNextInvalidatedProject(state, customTransformer),
             getAllParsedConfigs: () => arrayFrom(mapDefinedIterator(
                 state.configFileCache.values(),
                 config => isParsedCommandLine(config) ? config : undefined
