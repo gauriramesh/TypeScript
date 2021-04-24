@@ -802,12 +802,6 @@ namespace ts {
             };
 
         function done(cancellationToken?: CancellationToken, writeFile?: WriteFileCallback, customTransformers?: CustomTransformers) {
-            fs.appendFile('logForGauri.txt', `${console.log(new Error().stack)}, calling done()`, () => {
-                if(customTransformers) {
-                    console.log('Custom transformer reached the done method')
-                    console.log(`transformer in done method is ${JSON.stringify(customTransformers)}`)
-                }
-            })
             executeSteps(BuildStep.Done, cancellationToken, writeFile, customTransformers);
             return doneInvalidatedProject(state, projectPath);
         }
@@ -901,7 +895,6 @@ namespace ts {
         }
 
         function emit(writeFileCallback?: WriteFileCallback, cancellationToken?: CancellationToken, customTransformers?: CustomTransformers): EmitResult {
-            console.log(`Deep into emit, custom transformer is ${JSON.stringify(customTransformers)}`)
             Debug.assertIsDefined(program);
             Debug.assert(step === BuildStep.Emit);
             // Before emitting lets backup state, so we can revert it back if there are declaration errors to handle emit and declaration errors correctly
@@ -1110,7 +1103,6 @@ namespace ts {
                         break;
 
                     case BuildStep.Emit:
-                        console.log(`Emitting files, transformer is ${JSON.stringify(customTransformers)}`)
                         emit(writeFile, cancellationToken, customTransformers);
                         break;
 
@@ -1119,14 +1111,10 @@ namespace ts {
                         break;
 
                     case BuildStep.EmitBundle:
-                        console.log(`Emitting bundle with transformer ${customTransformers}`)
                         emitBundle(writeFile, customTransformers);
                         break;
 
                     case BuildStep.BuildInvalidatedProjectOfBundle:
-                        fs.appendFile('logForGauri.txt', `executeSteps(), BuildInvalidatedProjectOfBundle`, () => {
-                            // do nothing
-                        })
                         Debug.checkDefined(invalidatedProjectOfBundle).done(cancellationToken);
                         step = BuildStep.Done;
                         break;
@@ -1688,9 +1676,6 @@ namespace ts {
             const invalidatedProject = getNextInvalidatedProject(state, buildOrder, reportQueue);
             if (!invalidatedProject) break;
             reportQueue = false;
-            fs.appendFile('logForGauri.txt', `in build(), calling done()`, () => {
-                console.log(`In build, calling done(), transformer is ${JSON.stringify(customTransformer)}`)
-            })
             invalidatedProject.done(cancellationToken, undefined, customTransformer);
             if (!state.diagnostics.has(invalidatedProject.projectPath)) successfulProjects++;
         }
@@ -1781,12 +1766,6 @@ namespace ts {
     }
 
     function buildNextInvalidatedProject(state: SolutionBuilderState, customTransformer?: CustomTransformers) {
-        console.log(`In build next invalidated project, custom transformer is ${JSON.stringify(customTransformer)}`)
-        fs.appendFile('logForGauri.txt', `state: ${state}, transformer: ${customTransformer} \\n`, () => {
-            if(customTransformer) {
-                console.log('custom transformer is defined')
-            }
-        })
         state.timerToBuildInvalidatedProject = undefined;
         if (state.reportFileChangeDetected) {
             state.reportFileChangeDetected = false;
@@ -1796,10 +1775,6 @@ namespace ts {
         const buildOrder = getBuildOrder(state);
         const invalidatedProject = getNextInvalidatedProject(state, buildOrder, /*reportQueue*/ false);
         if (invalidatedProject) {
-            fs.appendFile('logForGauri.txt', `in buildNextInvalidatedProject(), calling done()`, () => {
-                console.log('In invalidated project')
-                console.log(`transformer in invalidated project is ${JSON.stringify(customTransformer)}`)
-            })
             invalidatedProject.done(undefined, undefined, customTransformer);
             if (state.projectPendingBuild.size) {
                 // Schedule next project for build

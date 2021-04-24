@@ -310,7 +310,6 @@ namespace ts {
         emitOnlyDtsFiles?: boolean,
         customTransformers?: CustomTransformers
     ) {
-        console.log(`Emitting files and reporting errors, custom transformer is ${JSON.stringify(customTransformers)}`)
         const isListFilesOnly = !!program.getCompilerOptions().listFilesOnly;
 
         // First get and report any syntactic errors.
