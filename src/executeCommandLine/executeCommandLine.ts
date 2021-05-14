@@ -476,6 +476,11 @@ namespace ts {
             return sys.exit(ExitStatus.DiagnosticsPresent_OutputsSkipped);
         }
 
+        let transformerOption: string | undefined = undefined;
+        if(buildOptions.transformer) {
+            transformerOption = buildOptions.transformer!.toString()
+        }
+
         if (buildOptions.watch) {
             if (reportWatchModeWithoutSysSupport(sys, reportDiagnostic)) return;
             const buildHost = createSolutionBuilderWithWatchHost(
@@ -487,7 +492,7 @@ namespace ts {
             );
             updateSolutionBuilderHost(sys, cb, buildHost);
             const builder = createSolutionBuilderWithWatch(buildHost, projects, buildOptions, watchOptions);
-            builder.build();
+            builder.build(undefined, undefined, transformerOption)
             return builder;
         }
 
@@ -500,7 +505,7 @@ namespace ts {
         );
         updateSolutionBuilderHost(sys, cb, buildHost);
         const builder = createSolutionBuilder(buildHost, projects, buildOptions);
-        const exitStatus = buildOptions.clean ? builder.clean() : builder.build();
+        const exitStatus = buildOptions.clean ? builder.clean() : builder.build(undefined, undefined, transformerOption);
         tracing?.dumpLegend();
         return sys.exit(exitStatus);
     }

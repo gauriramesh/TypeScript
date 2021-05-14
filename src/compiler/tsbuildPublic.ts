@@ -28,6 +28,8 @@ namespace ts {
         /* @internal */ generateTrace?: string;
 
         [option: string]: CompilerOptionsValue | undefined;
+        transformer?: string;
+        additionalTransformerFiles?: string[];
     }
 
     enum BuildResultFlags {
@@ -132,9 +134,9 @@ namespace ts {
     }
 
     export interface SolutionBuilder<T extends BuilderProgram> {
-        build(project?: string, cancellationToken?: CancellationToken, customTransformer?: CustomTransformers): ExitStatus;
+        build(project?: string, cancellationToken?: CancellationToken, customTransformer?: CustomTransformers | string): ExitStatus;
         clean(project?: string): ExitStatus;
-        buildReferences(project: string, cancellationToken?: CancellationToken, customTransformer?: CustomTransformers): ExitStatus;
+        buildReferences(project: string, cancellationToken?: CancellationToken, customTransformer?: CustomTransformers | string): ExitStatus;
         cleanReferences(project?: string): ExitStatus;
         getNextInvalidatedProject(cancellationToken?: CancellationToken): InvalidatedProject<T> | undefined;
 
@@ -1349,8 +1351,17 @@ namespace ts {
         let newestInputFileName: string = undefined!;
         let newestInputFileTime = minimumDate;
         const { host } = state;
+        let filesNames = project.fileNames;
+        if(state.options.transformer) {
+            filesNames = [...filesNames, state.options.transformer]
+        }
+
+        if(state.options.additionalTransformerFiles) {
+            filesNames = [...filesNames, ...state.options.additionalTransformerFiles]
+        }
+
         // Get timestamps of input files
-        for (const inputFile of project.fileNames) {
+        for (const inputFile of filesNames) {
             if (!host.fileExists(inputFile)) {
                 return {
                     type: UpToDateStatusType.Unbuildable,
@@ -1366,7 +1377,7 @@ namespace ts {
         }
 
         // Container if no files are specified in the project
-        if (!project.fileNames.length && !canJsonReportNoInputFiles(project.raw)) {
+        if (!filesNames.length && !canJsonReportNoInputFiles(project.raw)) {
             return {
                 type: UpToDateStatusType.ContainerOnly
             };
@@ -1664,7 +1675,13 @@ namespace ts {
         }
     }
 
-    function build(state: SolutionBuilderState, project?: string, cancellationToken?: CancellationToken, onlyReferences?: boolean, customTransformer?: CustomTransformers): ExitStatus {
+    function build(state: SolutionBuilderState, project?: string, cancellationToken?: CancellationToken, onlyReferences?: boolean, customTransformer?: CustomTransformers | string): ExitStatus {
+        let transformerObj = undefined
+        if(customTransformer && typeof customTransformer == 'string') {
+            transformerObj = require(customTransformer)
+        } else if(customTransformer) {
+            transformerObj = customTransformer
+        }
         const buildOrder = getBuildOrderFor(state, project, onlyReferences);
         if (!buildOrder) return ExitStatus.InvalidProject_OutputsSkipped;
 
@@ -1676,13 +1693,13 @@ namespace ts {
             const invalidatedProject = getNextInvalidatedProject(state, buildOrder, reportQueue);
             if (!invalidatedProject) break;
             reportQueue = false;
-            invalidatedProject.done(cancellationToken, undefined, customTransformer);
+            invalidatedProject.done(cancellationToken, undefined, transformerObj);
             if (!state.diagnostics.has(invalidatedProject.projectPath)) successfulProjects++;
         }
 
         disableCache(state);
         reportErrorSummary(state, buildOrder);
-        startWatching(state, buildOrder, customTransformer);
+        startWatching(state, buildOrder, transformerObj);
 
         return isCircularBuildOrder(buildOrder)
             ? ExitStatus.ProjectReferenceCycle_OutputsSkipped

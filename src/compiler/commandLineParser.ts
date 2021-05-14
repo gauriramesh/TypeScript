@@ -271,6 +271,22 @@ namespace ts {
             category: Diagnostics.Advanced_Options,
             description: Diagnostics.The_locale_used_when_displaying_messages_to_the_user_e_g_en_us
         },
+        {
+            name: "transformer",
+            category: Diagnostics.Command_line_Options,
+            description: Diagnostics.Delete_the_outputs_of_all_projects,
+            type: "string"
+        },
+        {
+            name: "additionalTransformerFiles",
+            category: Diagnostics.Command_line_Options,
+            description: Diagnostics.Delete_the_outputs_of_all_projects,
+            type: "list",
+            element: {
+                name: "additionalTransformerFiles",
+                type: "string"
+            }
+        }
     ];
 
     /* @internal */

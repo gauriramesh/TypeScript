@@ -5109,6 +5109,8 @@ declare namespace ts {
         assumeChangesOnlyAffectDirectDependencies?: boolean;
         traceResolution?: boolean;
         [option: string]: CompilerOptionsValue | undefined;
+        transformer?: string;
+        additionalTransformerFiles?: string[];
     }
     type ReportEmitErrorSummary = (errorCount: number) => void;
     interface SolutionBuilderHostBase<T extends BuilderProgram> extends ProgramHost<T> {
@@ -5132,9 +5134,9 @@ declare namespace ts {
     interface SolutionBuilderWithWatchHost<T extends BuilderProgram> extends SolutionBuilderHostBase<T>, WatchHost {
     }
     interface SolutionBuilder<T extends BuilderProgram> {
-        build(project?: string, cancellationToken?: CancellationToken, customTransformer?: CustomTransformers): ExitStatus;
+        build(project?: string, cancellationToken?: CancellationToken, customTransformer?: CustomTransformers | string): ExitStatus;
         clean(project?: string): ExitStatus;
-        buildReferences(project: string, cancellationToken?: CancellationToken, customTransformer?: CustomTransformers): ExitStatus;
+        buildReferences(project: string, cancellationToken?: CancellationToken, customTransformer?: CustomTransformers | string): ExitStatus;
         cleanReferences(project?: string): ExitStatus;
         getNextInvalidatedProject(cancellationToken?: CancellationToken): InvalidatedProject<T> | undefined;
     }
